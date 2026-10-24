@@ -1,0 +1,35 @@
+# Запуск всей системы одной командой:  docker compose up --build
+# Параметры читаются из .env (шаблон — .env.example); без .env всё работает с демо-значениями.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AUTH_SECRET: ${AUTH_SECRET:-dev-insecure-secret-change-me}
+      TOKEN_TTL_HOURS: ${TOKEN_TTL_HOURS:-72}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Необязательно: Yandex Object Storage вместо локального диска
+      YANDEX_ACCESS_KEY_ID: ${YANDEX_ACCESS_KEY_ID:-}
+      YANDEX_SECRET_ACCESS_KEY: ${YANDEX_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-pets-photos}
+    ports:
+      - "8080:8080"
+    volumes:
+      - petmatch_data:/data   # БД и загруженные фото переживают перезапуск
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./pet-swipe-app
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  petmatch_data:

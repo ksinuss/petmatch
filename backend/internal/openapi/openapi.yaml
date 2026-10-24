@@ -1,0 +1,525 @@
+openapi: 3.0.3
+info:
+  title: PetMatch API
+  version: 1.0.0
+  description: |
+    REST API сервиса знакомства людей с питомцами из приютов: регистрация, анкеты питомцев,
+    лента со свайпами и мэтчи.
+
+    **Авторизация.** После `POST /auth/register` или `POST /auth/login` вернётся `token`.
+    Передавайте его в заголовке `Authorization: Bearer <token>`. Токен живёт `TOKEN_TTL_HOURS` часов.
+
+    **Ошибки.** Все ошибки имеют единый формат `{"error": "<сообщение>", "code": "<код>"}`:
+    `invalid_input` (400), `unauthorized` (401), `forbidden` (403), `not_found` (404),
+    `conflict` (409), `internal` (500).
+servers:
+  - url: /
+    description: Текущий хост (напрямую :8080 или через веб-прокси /api)
+tags:
+  - name: Служебные
+  - name: Авторизация
+  - name: Профиль
+  - name: Питомцы
+  - name: Свайпы и мэтчи
+  - name: Предпочтения
+
+paths:
+  /health:
+    get:
+      tags: [Служебные]
+      summary: Проверка работоспособности
+      responses:
+        "200":
+          description: Сервис и база данных доступны
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  demo: { type: boolean, description: Включены ли демо-данные (SEED_DEMO) }
+        "503":
+          description: База данных недоступна
+
+  /auth/register:
+    post:
+      tags: [Авторизация]
+      summary: Регистрация
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterInput" }
+      responses:
+        "201":
+          description: Аккаунт создан, токен выдан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409":
+          description: Email уже зарегистрирован
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/login:
+    post:
+      tags: [Авторизация]
+      summary: Вход
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginInput" }
+      responses:
+        "200":
+          description: Успешный вход
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Неверный email или пароль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /me:
+    get:
+      tags: [Профиль]
+      summary: Мой профиль
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Профиль текущего пользователя
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    put:
+      tags: [Профиль]
+      summary: Обновить профиль
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateMeInput" }
+      responses:
+        "200":
+          description: Обновлённый профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /users/{id}:
+    get:
+      tags: [Профиль]
+      summary: Публичный профиль пользователя (без email)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Публичный профиль
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicAccount" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /users/{id}/pets:
+    get:
+      tags: [Питомцы]
+      summary: Питомцы конкретного пользователя
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Список питомцев
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /pets:
+    post:
+      tags: [Питомцы]
+      summary: Создать анкету питомца
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePetInput" }
+      responses:
+        "201":
+          description: Питомец создан
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /pets/feed:
+    get:
+      tags: [Питомцы]
+      summary: Лента для свайпов
+      description: |
+        До 10 питомцев, которых пользователь ещё не оценивал. Свои анкеты в ленту не попадают.
+        Питомцы, подходящие под сохранённые предпочтения, показываются первыми.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Список карточек (может быть пустым)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /pets/{id}:
+    get:
+      tags: [Питомцы]
+      summary: Карточка питомца
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Питомец
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /pets/{id}/photos:
+    post:
+      tags: [Питомцы]
+      summary: Загрузить фото питомца
+      description: Только владелец. JPEG, PNG или WebP до 5 МБ; тип определяется по содержимому файла.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo: { type: string, format: binary }
+      responses:
+        "201":
+          description: Фото сохранено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, example: /uploads/3f9c1a.jpg }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Питомец принадлежит другому пользователю
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /my-pets:
+    get:
+      tags: [Питомцы]
+      summary: Мои питомцы
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Список питомцев текущего пользователя
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pet" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /swipes:
+    post:
+      tags: [Свайпы и мэтчи]
+      summary: Лайк или дизлайк питомца
+      description: |
+        Для питомца в режиме `open` лайк сразу создаёт мэтч. В режиме `strict` мэтч появляется,
+        когда владелец тоже лайкнул пользователя (`/owner-swipes`).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SwipeInput" }
+      responses:
+        "200":
+          description: Результат свайпа
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SwipeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Нельзя оценивать собственного питомца
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Питомец уже оценён этим пользователем
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /owner-swipes:
+    post:
+      tags: [Свайпы и мэтчи]
+      summary: Владелец отвечает на лайк пользователя (режим strict)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OwnerSwipeInput" }
+      responses:
+        "200":
+          description: Результат
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SwipeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Питомец принадлежит другому пользователю
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Ответ уже был
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /matches:
+    get:
+      tags: [Свайпы и мэтчи]
+      summary: Мои мэтчи
+      description: Мэтчи, где пользователь лайкнул питомца или сам является его владельцем. Сверху — самые свежие.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Список мэтчей
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Match" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /preferences:
+    get:
+      tags: [Предпочтения]
+      summary: Мои предпочтения для ленты
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Предпочтения (пустые значения, если не задавались)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [Предпочтения]
+      summary: Сохранить предпочтения
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Preferences" }
+      responses:
+        "200":
+          description: Сохранено
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+  responses:
+    BadRequest:
+      description: Некорректные данные запроса
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: Укажите кличку питомца, code: invalid_input }
+    Unauthorized:
+      description: Нет токена, он недействителен или истёк
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: Требуется авторизация, code: unauthorized }
+    NotFound:
+      description: Объект не найден
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: Питомец не найден, code: not_found }
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string }
+        code:
+          type: string
+          enum: [invalid_input, unauthorized, forbidden, not_found, conflict, internal]
+    RegisterInput:
+      type: object
+      required: [email, password, display_name, role]
+      properties:
+        email: { type: string, format: email, example: anna@example.com }
+        password: { type: string, minLength: 6, maxLength: 72 }
+        display_name: { type: string, maxLength: 60, example: Анна }
+        role:
+          type: string
+          enum: [user]
+          description: Сейчас доступна одна роль — user (человек и хозяин питомцев)
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string }
+        user_id: { type: integer }
+        user: { $ref: "#/components/schemas/Account" }
+    Account:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        role: { type: string, enum: [user, shelter] }
+        display_name: { type: string }
+        bio: { type: string }
+        location: { type: string }
+    PublicAccount:
+      type: object
+      properties:
+        id: { type: integer }
+        role: { type: string, enum: [user, shelter] }
+        display_name: { type: string }
+        bio: { type: string }
+        location: { type: string }
+    UpdateMeInput:
+      type: object
+      required: [display_name]
+      properties:
+        display_name: { type: string, maxLength: 60 }
+        bio: { type: string, maxLength: 500 }
+        location: { type: string, maxLength: 80 }
+    CreatePetInput:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, maxLength: 50, example: Рич }
+        type: { type: string, enum: [dog, cat, other] }
+        breed: { type: string, maxLength: 60 }
+        age: { type: integer, minimum: 0, maximum: 40 }
+        description: { type: string, maxLength: 1000 }
+        adoption_mode:
+          type: string
+          enum: [open, strict]
+          default: open
+    Pet:
+      type: object
+      properties:
+        id: { type: integer }
+        owner_id: { type: integer }
+        owner_name: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [dog, cat, other] }
+        breed: { type: string }
+        age: { type: integer }
+        description: { type: string }
+        adoption_mode: { type: string, enum: [open, strict] }
+        status: { type: string, example: available }
+        photos:
+          type: array
+          items: { type: string }
+    SwipeInput:
+      type: object
+      required: [pet_id, is_like]
+      properties:
+        pet_id: { type: integer }
+        is_like: { type: boolean }
+    OwnerSwipeInput:
+      type: object
+      required: [user_id, pet_id, is_like]
+      properties:
+        user_id: { type: integer }
+        pet_id: { type: integer }
+        is_like: { type: boolean }
+    SwipeResult:
+      type: object
+      properties:
+        match: { type: boolean }
+        match_id: { type: integer, description: Присутствует, только если match = true }
+    Match:
+      type: object
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        pet:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            type: { type: string }
+            breed: { type: string }
+            photo: { type: string }
+        partner:
+          type: object
+          description: Второй участник мэтча
+          properties:
+            id: { type: integer }
+            display_name: { type: string }
+            role: { type: string }
+    Preferences:
+      type: object
+      properties:
+        preferred_type: { type: string, enum: ["", dog, cat, other] }
+        min_age: { type: integer }
+        max_age: { type: integer }
+        preferred_breed: { type: string }
+        preferred_location: { type: string }

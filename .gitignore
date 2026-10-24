@@ -1,0 +1,20 @@
+# Секреты и окружение
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Данные и загрузки
+*.db
+uploads/
+
+# Логи и бинарники
+*.log
+*.exe
+/server
+node_modules/
